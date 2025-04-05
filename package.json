@@ -1,0 +1,29 @@
+{
+	"name": "@kevinbioj/gtfsrt-twisto",
+	"description": "GTFS-RT data producer for Twisto (based on official SIRI).",
+	"version": "0.1.0",
+	"type": "module",
+	"main": "dist/index.js",
+	"author": "Kevin BIOJOUT <coucou@kevinbioj.fr>",
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsx --watch src/index.ts",
+		"start": "node .",
+		"lint": "biome lint",
+		"format": "biome format --write"
+	},
+	"packageManager": "pnpm@10.7.1",
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/node": "^22.14.0",
+		"tsx": "^4.19.3",
+		"typescript": "^5.8.3"
+	},
+	"dependencies": {
+		"@hono/node-server": "^1.14.0",
+		"fast-xml-parser": "^5.2.0",
+		"gtfs-realtime-bindings": "^1.1.1",
+		"hono": "^4.7.5",
+		"temporal-polyfill": "^0.3.0"
+	}
+}
