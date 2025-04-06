@@ -217,7 +217,8 @@ while (true) {
 					]
 						.flatMap((stopCall) => {
 							const stopTimeUpdate: GtfsRealtime.transit_realtime.TripUpdate.IStopTimeUpdate = {
-								stopId: parseRef(stopCall.StopPointRef)[VALUE_ID].toLowerCase(),
+								// 2025-04-06 : some stops can't be matched auto-magically, so we only publish sequence for now
+								// stopId: parseRef(stopCall.StopPointRef)[VALUE_ID].toLowerCase(),
 								stopSequence: stopCall.Order,
 							};
 
@@ -261,9 +262,10 @@ while (true) {
 						.toSorted((a, b) => (a.stopSequence ?? 0) - (b.stopSequence ?? 0)),
 					trip: tripDescriptor,
 					timestamp: recordedAtEpoch,
+					vehicle: vehicleDescriptor,
 				});
 
-				const currentStopRef = atStop ? monitoredCall?.StopPointRef : onwardCalls[0]?.StopPointRef;
+				// const currentStopRef = atStop ? monitoredCall?.StopPointRef : onwardCalls[0]?.StopPointRef;
 
 				if (typeof journey.VehicleLocation !== "undefined") {
 					vehiclePositions.set(`VM:${vehicleId}`, {
@@ -276,7 +278,8 @@ while (true) {
 							longitude: journey.VehicleLocation.Longitude,
 							bearing: journey.Bearing,
 						},
-						stopId: currentStopRef ? parseRef(currentStopRef)[VALUE_ID].toLowerCase() : undefined,
+						// 2025-04-06 : some stops can't be matched auto-magically, so we only publish sequence for now
+						// stopId: currentStopRef ? parseRef(currentStopRef)[VALUE_ID].toLowerCase() : undefined,
 						timestamp: recordedAtEpoch,
 						trip: tripDescriptor,
 						vehicle: vehicleDescriptor,
