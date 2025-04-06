@@ -1,11 +1,18 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import GtfsRealtime from "gtfs-realtime-bindings";
 
 import { serve } from "@hono/node-server";
+import GtfsRealtime from "gtfs-realtime-bindings";
 import { Hono } from "hono";
 import { stream } from "hono/streaming";
 import { Temporal } from "temporal-polyfill";
+
 import { createFeed } from "./gtfs-rt/create-feed.js";
+import { downloadGtfs } from "./gtfs/download-gtfs.js";
+import { importGtfs } from "./gtfs/import-gtfs.js";
+
 import { getVehicleMonitoring } from "./siri/get-vehicle-monitoring.js";
 import { VALUE_ID, parseRef } from "./siri/parse-ref.js";
 import type { StopCall } from "./siri/types.js";
@@ -15,11 +22,25 @@ const fixTimestamp = (input: string) => {
 	return `${input}[${input.slice(plusIndex)}]`;
 };
 
+const GTFS_URL =
+	"https://data.twisto.fr/api/explore/v2.1/catalog/datasets/fichier-gtfs-du-reseau-twisto/alternative_exports/gtfs_twisto_zip/";
 const SIRI_WS = "https://api.okina.fr/gateway/cae/realtime/anshar/ws/services";
 const SIRI_REQUESTOR = "BUS-TRACKER.FR";
 
 const tripUpdates = new Map<string, GtfsRealtime.transit_realtime.ITripUpdate>();
 const vehiclePositions = new Map<string, GtfsRealtime.transit_realtime.IVehiclePosition>();
+
+// ---
+
+console.log("► Importing GTFS into memory");
+let tripIds: string[];
+const resourceDirectory = await mkdtemp(join(tmpdir(), "twisto-gtfs_"));
+try {
+	await downloadGtfs(GTFS_URL, resourceDirectory);
+	tripIds = await importGtfs(resourceDirectory);
+} finally {
+	await rm(resourceDirectory, { recursive: true, force: true });
+}
 
 // ---
 
@@ -152,6 +173,10 @@ while (true) {
 							: [journey.OnwardCalls?.OnwardCall]
 						: [];
 
+				const gtfsTripId = tripIds.find((tripId) =>
+					tripId.startsWith(journey.VehicleJourneyName.slice(0, journey.VehicleJourneyName.indexOf("-"))),
+				);
+
 				const waitingForDeparture =
 					Temporal.ZonedDateTime.compare(
 						Temporal.Now.zonedDateTimeISO(),
@@ -164,7 +189,7 @@ while (true) {
 					Temporal.Instant.compare(vehicleActivity.RecordedAtTime, monitoredCall.ExpectedDepartureTime) < 0;
 
 				const tripDescriptor = {
-					tripId: journey.VehicleJourneyName,
+					tripId: gtfsTripId ?? journey.VehicleJourneyName,
 					routeId: parseRef(journey.LineRef)[VALUE_ID],
 					directionId: journey.DirectionName - 1,
 					scheduleRelationship: GtfsRealtime.transit_realtime.TripDescriptor.ScheduleRelationship.SCHEDULED,
@@ -175,7 +200,7 @@ while (true) {
 					label: vehicleId.slice(vehicleId.indexOf("_") + 1),
 				};
 
-				tripUpdates.set(`SM:${journey.VehicleJourneyName}`, {
+				tripUpdates.set(`SM:${gtfsTripId ?? journey.VehicleJourneyName}`, {
 					stopTimeUpdate: [
 						...(waitingForDeparture
 							? [
@@ -200,9 +225,6 @@ while (true) {
 								stopTimeUpdate.scheduleRelationship =
 									GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.SKIPPED;
 							} else {
-								stopTimeUpdate.scheduleRelationship =
-									GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.SCHEDULED;
-
 								if (
 									stopCall.ArrivalStatus !== "noReport" &&
 									typeof stopCall.ExpectedArrivalTime !== "undefined" &&
@@ -224,6 +246,14 @@ while (true) {
 											.total("seconds"),
 									};
 								}
+
+								if (typeof stopTimeUpdate.arrival === "undefined" && typeof stopTimeUpdate.departure === "undefined") {
+									stopTimeUpdate.scheduleRelationship =
+										GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA;
+								} else {
+									stopTimeUpdate.scheduleRelationship =
+										GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.SCHEDULED;
+								}
 							}
 
 							return stopTimeUpdate;
@@ -235,21 +265,23 @@ while (true) {
 
 				const currentStopRef = atStop ? monitoredCall?.StopPointRef : onwardCalls[0]?.StopPointRef;
 
-				vehiclePositions.set(`VM:${vehicleId}`, {
-					currentStatus: atStop
-						? GtfsRealtime.transit_realtime.VehiclePosition.VehicleStopStatus.STOPPED_AT
-						: GtfsRealtime.transit_realtime.VehiclePosition.VehicleStopStatus.IN_TRANSIT_TO,
-					currentStopSequence: atStop ? monitoredCall!.Order : onwardCalls[0]!.Order,
-					position: {
-						latitude: journey.VehicleLocation.Latitude,
-						longitude: journey.VehicleLocation.Longitude,
-						bearing: journey.Bearing,
-					},
-					stopId: currentStopRef ? parseRef(currentStopRef)[VALUE_ID].toLowerCase() : undefined,
-					timestamp: recordedAtEpoch,
-					trip: tripDescriptor,
-					vehicle: vehicleDescriptor,
-				});
+				if (typeof journey.VehicleLocation !== "undefined") {
+					vehiclePositions.set(`VM:${vehicleId}`, {
+						currentStatus: atStop
+							? GtfsRealtime.transit_realtime.VehiclePosition.VehicleStopStatus.STOPPED_AT
+							: GtfsRealtime.transit_realtime.VehiclePosition.VehicleStopStatus.IN_TRANSIT_TO,
+						currentStopSequence: atStop ? monitoredCall!.Order : onwardCalls[0]!.Order,
+						position: {
+							latitude: journey.VehicleLocation.Latitude,
+							longitude: journey.VehicleLocation.Longitude,
+							bearing: journey.Bearing,
+						},
+						stopId: currentStopRef ? parseRef(currentStopRef)[VALUE_ID].toLowerCase() : undefined,
+						timestamp: recordedAtEpoch,
+						trip: tripDescriptor,
+						vehicle: vehicleDescriptor,
+					});
+				}
 			} catch (cause) {
 				const error = new Error(`Failed to handle vehicle "${vehicleActivity.VehicleMonitoringRef}"`, { cause });
 				console.error(error);
