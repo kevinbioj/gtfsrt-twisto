@@ -30,6 +30,22 @@ const SIRI_REQUESTOR = "BUS-TRACKER.FR";
 const tripUpdates = new Map<string, GtfsRealtime.transit_realtime.ITripUpdate>();
 const vehiclePositions = new Map<string, GtfsRealtime.transit_realtime.IVehiclePosition>();
 
+setInterval(() => {
+	const currentEpoch = Math.floor(Date.now() / 1000);
+
+	for (const [id, tripUpdate] of tripUpdates) {
+		if (currentEpoch - +tripUpdate.timestamp! >= 3600) {
+			tripUpdates.delete(id);
+		}
+	}
+
+	for (const [id, vehicle] of vehiclePositions) {
+		if (currentEpoch - +vehicle.timestamp! >= 3600) {
+			vehiclePositions.delete(id);
+		}
+	}
+}, 120_000);
+
 // ---
 
 console.log("► Importing GTFS into memory");
