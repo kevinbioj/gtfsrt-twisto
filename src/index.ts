@@ -13,6 +13,7 @@ import { createFeed } from "./gtfs-rt/create-feed.js";
 import { downloadGtfs } from "./gtfs/download-gtfs.js";
 import { importGtfs } from "./gtfs/import-gtfs.js";
 
+import { lines } from "./lines.js";
 import { getVehicleMonitoring } from "./siri/get-vehicle-monitoring.js";
 import { VALUE_ID, parseRef } from "./siri/parse-ref.js";
 import type { StopCall } from "./siri/types.js";
@@ -49,11 +50,11 @@ setInterval(() => {
 // ---
 
 console.log("► Importing GTFS into memory");
-let tripIds: string[];
+let gtfs: Awaited<ReturnType<typeof importGtfs>>;
 const resourceDirectory = await mkdtemp(join(tmpdir(), "twisto-gtfs_"));
 try {
 	await downloadGtfs(GTFS_URL, resourceDirectory);
-	tripIds = await importGtfs(resourceDirectory);
+	gtfs = await importGtfs(resourceDirectory);
 } finally {
 	await rm(resourceDirectory, { recursive: true, force: true });
 }
@@ -79,90 +80,7 @@ serve({ fetch: hono.fetch, port: +(process.env.PORT ?? 3000) });
 
 // ---
 
-const lines = [
-	{ LineRef: "SIRI_NVP_037:Line::1:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::114:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::106:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::123:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F3:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::RES4:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::10:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::113:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::D1EB:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::105:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::104:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::RES3:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::9:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::11EX:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F2:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::8:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::41:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::120:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::6A:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::T1:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::37:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::116:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::T2:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::6B:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::121:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F5:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::B2:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::11:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::MP:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::7:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::B1:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F4:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::T3:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::102:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::115:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::10EX:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::12:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::NUIT:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::RES5:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::22:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::101:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::30:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::119:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::127:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F7:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::NVCV:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::110:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::40:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::100:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::4:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::32:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::118:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::5:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::31:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::109:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F6:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::23:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::126:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::B3:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::125:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::108:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::3:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::33:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::F1:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::20:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::112:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::2:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::12EX:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::34:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::137:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::107:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::RES1:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::21:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::111:LOC", Monitored: true },
-	{ LineRef: "SIRI_NVP_037:Line::124:LOC", Monitored: true },
-];
-
-// const lines = await linesDiscovery(SIRI_WS, SIRI_REQUESTOR);
 const monitoredLines = lines.filter(({ Monitored }) => Monitored);
-console.log("► %d lines were discovered (%d monitored)", lines.length, monitoredLines.length);
-
-console.log("ⓘ Waiting 60 seconds to avoid rate-limiting");
-// await setTimeout(60_000);
 
 while (true) {
 	try {
@@ -189,7 +107,7 @@ while (true) {
 							: [journey.OnwardCalls?.OnwardCall]
 						: [];
 
-				const gtfsTripId = tripIds.find((tripId) =>
+				const gtfsTripId = gtfs.tripIds.find((tripId) =>
 					tripId.startsWith(journey.VehicleJourneyName.slice(0, journey.VehicleJourneyName.indexOf("-"))),
 				);
 
@@ -208,7 +126,9 @@ while (true) {
 					tripId: gtfsTripId ?? journey.VehicleJourneyName,
 					routeId: parseRef(journey.LineRef)[VALUE_ID],
 					directionId: journey.DirectionName - 1,
-					scheduleRelationship: GtfsRealtime.transit_realtime.TripDescriptor.ScheduleRelationship.SCHEDULED,
+					scheduleRelationship: gtfsTripId
+						? GtfsRealtime.transit_realtime.TripDescriptor.ScheduleRelationship.SCHEDULED
+						: GtfsRealtime.transit_realtime.TripDescriptor.ScheduleRelationship.ADDED,
 				};
 
 				const vehicleDescriptor = {
@@ -232,9 +152,11 @@ while (true) {
 						...onwardCalls,
 					]
 						.flatMap((stopCall) => {
+							const stopId = parseRef(stopCall.StopPointRef)[VALUE_ID].toLowerCase();
+							if (!gtfs.stops.has(stopId.toLowerCase())) return [];
+
 							const stopTimeUpdate: GtfsRealtime.transit_realtime.TripUpdate.IStopTimeUpdate = {
-								// 2025-04-06 : some stops can't be matched auto-magically, so we only publish sequence for now
-								// stopId: parseRef(stopCall.StopPointRef)[VALUE_ID].toLowerCase(),
+								stopId,
 								stopSequence: stopCall.Order,
 							};
 
@@ -268,8 +190,9 @@ while (true) {
 									stopTimeUpdate.scheduleRelationship =
 										GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.NO_DATA;
 								} else {
-									stopTimeUpdate.scheduleRelationship =
-										GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.SCHEDULED;
+									stopTimeUpdate.scheduleRelationship = gtfsTripId
+										? GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.SCHEDULED
+										: GtfsRealtime.transit_realtime.TripUpdate.StopTimeUpdate.ScheduleRelationship.UNSCHEDULED;
 								}
 							}
 
@@ -281,7 +204,9 @@ while (true) {
 					vehicle: vehicleDescriptor,
 				});
 
-				// const currentStopRef = atStop ? monitoredCall?.StopPointRef : onwardCalls[0]?.StopPointRef;
+				const currentStopRef = parseRef(atStop ? monitoredCall!.StopPointRef : onwardCalls[0]!.StopPointRef)[
+					VALUE_ID
+				].toLowerCase();
 
 				if (typeof journey.VehicleLocation !== "undefined") {
 					vehiclePositions.set(`VM:${vehicleId}`, {
@@ -294,8 +219,7 @@ while (true) {
 							longitude: journey.VehicleLocation.Longitude,
 							bearing: journey.Bearing,
 						},
-						// 2025-04-06 : some stops can't be matched auto-magically, so we only publish sequence for now
-						// stopId: currentStopRef ? parseRef(currentStopRef)[VALUE_ID].toLowerCase() : undefined,
+						stopId: gtfs.stops.has(currentStopRef) ? currentStopRef : undefined,
 						timestamp: recordedAtEpoch,
 						trip: tripDescriptor,
 						vehicle: vehicleDescriptor,

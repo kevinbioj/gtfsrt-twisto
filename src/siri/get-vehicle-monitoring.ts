@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Temporal } from "temporal-polyfill";
 
+import { readFileSync } from "node:fs";
 import type { GetVehicleMonitoringResponse, SoapResponse } from "./types.js";
 import { parser } from "./xml-parser.js";
 
@@ -22,20 +23,22 @@ const payload = (requestorRef: string, lineRefs: string[]) => `
 </S:Envelope>`;
 
 export async function getVehicleMonitoring(url: string, requestorRef: string, lineRefs: string[]) {
-	const response = await fetch(url, {
-		method: "POST",
-		body: payload(requestorRef, lineRefs),
-		headers: {
-			"Content-Type": "application/xml",
-		},
-		signal: AbortSignal.timeout(30_000),
-	});
+	// const response = await fetch(url, {
+	// 	method: "POST",
+	// 	body: payload(requestorRef, lineRefs),
+	// 	headers: {
+	// 		"Content-Type": "application/xml",
+	// 	},
+	// 	signal: AbortSignal.timeout(30_000),
+	// });
 
-	if (!response.ok) {
-		throw new Error(`Failed to perform get vehicle monitoring (HTTP ${response.status})`);
-	}
+	// if (!response.ok) {
+	// 	throw new Error(`Failed to perform get vehicle monitoring (HTTP ${response.status})`);
+	// }
 
-	const serializedXml = await response.text();
+	// const serializedXml = await response.text();
+	// console.log(serializedXml);
+	const serializedXml = readFileSync("./sample.xml").toString();
 	const soapResponse = parser.parse(serializedXml) as SoapResponse<GetVehicleMonitoringResponse>;
 
 	const vehicleActivities =
