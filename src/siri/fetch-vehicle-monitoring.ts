@@ -44,7 +44,16 @@ export type MonitoredCall = {
 export type MonitoredJourney = {
 	/** Numéro de parc du véhicule, tel que la source l'écrit (« Keolis_5210 »). */
 	vehicleId: string;
-	/** Nom commercial de la ligne (« 4 », « T1 », « B1 ») — l'identifiant de ligne du GTFS. */
+	/**
+	 * Identifiant de la ligne selon la source (« 5 », « T1 », « NVCV »), tiré de son `LineRef` : c'est
+	 * lui qui porte le `route_id` du GTFS, et c'est donc par lui que la ligne se rapproche.
+	 */
+	lineRef: string;
+	/**
+	 * Nom commercial de la ligne, tel que la source l'affiche (« Ligne 5 », « Nav », « NUI »). Un
+	 * libellé de girouette, à ne pas confondre avec {@link lineRef} : la source l'écrit à sa façon, et
+	 * il ne se retrouve pas dans le GTFS (« Nav » pour la ligne « NVCV »).
+	 */
 	lineName: string;
 	directionId: number;
 	/** Sens tel que la source l'écrit (« ALLER », « RETOUR », « 1 », « 2 »), pour le journal. */
@@ -133,6 +142,7 @@ function toJourney(activity: RawVehicleActivity): MonitoredJourney | undefined {
 
 	return {
 		vehicleId,
+		lineRef: siriRef(monitoredJourney.LineRef),
 		lineName: decodeSiriText(monitoredJourney.PublishedLineName) || siriRef(monitoredJourney.LineRef),
 		directionId: toDirectionId(directionName),
 		directionName,

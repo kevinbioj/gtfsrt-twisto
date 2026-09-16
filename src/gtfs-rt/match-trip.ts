@@ -56,7 +56,10 @@ const MAX_SERVICE_DAY_SPAN = 30 * 3600;
  * GTFS écrit « 25:10:00 », et c'est en cherchant sur les deux qu'on la retrouve.
  */
 export function matchTrip(gtfs: StaticGtfs, days: readonly ServiceDay[], journey: MonitoredJourney): TripMatch {
-	const routeId = resolveRouteId(gtfs, journey.lineName);
+	// La ligne se rapproche par la référence du SAE, qui porte le `route_id` : son nom commercial, lui,
+	// est un libellé d'affichage que le GTFS ne connaît pas (« Ligne 5 » pour « 5 », « Nav » pour
+	// « NVCV »). Il ne sert que de recours, pour un relevé qui viendrait sans référence de ligne.
+	const routeId = resolveRouteId(gtfs, journey.lineRef) ?? resolveRouteId(gtfs, journey.lineName);
 	const reference = journey.originAimedDeparture ?? journey.recordedAt;
 
 	const known = journey.journeyName ? gtfs.trips.get(journey.journeyName) : undefined;
@@ -147,8 +150,9 @@ function extraTrip(journey: MonitoredJourney, routeId: string | undefined, refer
 		scheduled: false,
 		// Le nom de course du SAE fait l'identifiant : c'est le seul dont il soit constant d'un relevé à
 		// l'autre. À défaut, la référence datée de la course, qu'il donne toujours.
-		tripId: journey.journeyName || journey.datedJourneyRef || `${journey.lineName}-${journey.vehicleId}`,
-		routeId: routeId ?? journey.lineName,
+		tripId:
+			journey.journeyName || journey.datedJourneyRef || `${journey.lineRef || journey.lineName}-${journey.vehicleId}`,
+		routeId: routeId ?? (journey.lineRef || journey.lineName),
 		directionId: journey.directionId,
 		startDate,
 		startTime: formatServiceTime(midnight === undefined ? 0 : reference - midnight),

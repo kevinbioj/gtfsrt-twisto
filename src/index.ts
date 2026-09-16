@@ -224,7 +224,7 @@ async function poll() {
 
 /** Le véhicule tel qu'il s'écrit au journal : sa course, où il en est, et son retard. */
 function describeJourney(journey: MonitoredJourney, match: TripMatch, built: BuiltEntities): string {
-	const identity = `${journey.vehicleId.padEnd(12, " ")} ${journey.lineName.padEnd(3, " ")} ${match.directionId}`;
+	const identity = `${journey.vehicleId.padEnd(12, " ")} ${(journey.lineRef || journey.lineName).padEnd(4, " ")} ${match.directionId}`;
 	const trip = `${match.tripId.padEnd(34, " ")} (${match.by}${match.ambiguous ? ", ambiguous" : ""})`;
 
 	if (built.cancelled) return `${identity}  ${trip} — course annulée`;
