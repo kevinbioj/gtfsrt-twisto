@@ -1,0 +1,31 @@
+{
+	"name": "@bus-tracker/gtfsrt-twisto",
+	"description": "GTFS-RT data producer for Twisto (Caen, France)",
+	"version": "0.1.0",
+	"author": "Kevin BIOJOUT <biojoutk1106@gmail.com>",
+	"license": "MIT",
+	"main": "dist/index.js",
+	"type": "module",
+	"scripts": {
+		"dev": "tsx --env-file .env src/index.ts",
+		"build": "tsc",
+		"start": "node dist/index.js",
+		"check": "biome check",
+		"check:fix": "biome check --fix"
+	},
+	"packageManager": "pnpm@12.4.2+sha512.08adc6613180275c7c9edada39dcf08c9c61ad4e7eaf330a4f3461f102b0f907423454d117f98e72d47fef0616070644d7bffc973a6a57f5090a6d7c368b07c9",
+	"dependencies": {
+		"@hono/node-server": "^2.1.1",
+		"fast-xml-parser": "^5.11.1",
+		"fflate": "^0.8.3",
+		"gtfs-realtime-bindings": "^2.2.0",
+		"hono": "^4.13.8",
+		"hono-rate-limiter": "^0.5.4"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.13",
+		"@types/node": "^26.6.1",
+		"tsx": "^4.23.13",
+		"typescript": "^7.0.2"
+	}
+}
