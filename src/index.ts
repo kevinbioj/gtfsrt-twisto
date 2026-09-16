@@ -64,6 +64,27 @@ hono.get("/vehicle-positions.json", (c) => handleRequest(c, "json", null, publis
 // Les modifications accompagnent les courses : une course modifiée ne se lit pas sans elles.
 hono.get("/trip-updates", (c) => handleRequest(c, "protobuf", publishedTripUpdates(), null, publishedModifications()));
 hono.get("/trip-updates.json", (c) => handleRequest(c, "json", publishedTripUpdates(), null, publishedModifications()));
+/**
+ * L'archive GTFS statique du réseau. Le portail la sert en `no-store`, sans ETag ni `Last-Modified` :
+ * un consommateur ne peut donc pas savoir qu'une nouvelle version est parue sans la retélécharger
+ * entièrement. Cette route lui répond ce que le producteur sait déjà — la date de parution que le
+ * portail annonce dans les métadonnées du jeu de données, à défaut l'instant de son dernier import —,
+ * et renvoie le téléchargement lui-même vers le portail plutôt que de relayer treize mégaoctets.
+ */
+hono.on(["GET", "HEAD"], "/static-gtfs", (c) => {
+	const lastModified = staticGtfs.publishedAt ?? staticGtfs.importedAt;
+	c.header("Last-Modified", new Date(lastModified.epochMilliseconds).toUTCString());
+
+	// Une réponse à HEAD porte les en-têtes de ce que le GET rendrait, sans corps ni redirection : c'est
+	// la date que le client vient chercher, pas la ressource.
+	if (c.req.method === "HEAD") {
+		c.header("Content-Type", "application/zip");
+		return c.body(null, 200);
+	}
+
+	return c.redirect(STATIC_GTFS_URL, 302);
+});
+
 hono.get("/", (c) =>
 	handleRequest(
 		c,

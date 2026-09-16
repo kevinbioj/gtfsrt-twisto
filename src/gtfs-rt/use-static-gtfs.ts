@@ -160,6 +160,12 @@ export async function useStaticGtfs(url: string, checkInterval: number) {
 	const resource = {
 		data: loaded.data,
 		importedAt: Temporal.Now.instant(),
+		/**
+		 * Date de parution de la version chargée, telle que le portail l'annonce, ou `undefined` lorsqu'il
+		 * n'en annonce pas — sa signature n'est alors qu'une taille ou un ETag, qui ne se lit pas comme
+		 * une date.
+		 */
+		publishedAt: loaded.publishedAt,
 	};
 	// Version chargée, telle que la publie le portail : sert à détecter une nouvelle parution sans
 	// retélécharger l'archive à chaque vérification.
@@ -171,18 +177,23 @@ export async function useStaticGtfs(url: string, checkInterval: number) {
 
 	currentInterval = setInterval(async () => {
 		const remote = await fetchSignature(url);
-		if (remote === null || remote === signature) return; // inchangé, ou signature indisponible → on garde
+		// Inchangé, ou signature indisponible → on garde.
+		if (remote === null || remote.signature === signature) return;
 
 		const next = await loadGtfs(url);
 		if (next.data.trips.size === 0) return; // chargement échoué → on garde l'ancien
 		resource.data = next.data;
 		resource.importedAt = Temporal.Now.instant();
+		resource.publishedAt = next.publishedAt;
 		signature = next.signature;
 		console.log("✓ Static GTFS updated (new version published).");
 	}, checkInterval);
 
 	return resource;
 }
+
+/** Le GTFS statique tenu à jour par {@link useStaticGtfs}. */
+export type StaticGtfsResource = Awaited<ReturnType<typeof useStaticGtfs>>;
 
 // ---
 
@@ -191,7 +202,7 @@ export async function useStaticGtfs(url: string, checkInterval: number) {
  * date de publication se lit sur les métadonnées du jeu de données, et la taille de l'archive sert de
  * repli. `null` quand aucune des deux n'est disponible — on garde alors ce qui est chargé.
  */
-async function fetchSignature(url: string): Promise<string | null> {
+async function fetchSignature(url: string): Promise<Signature | null> {
 	try {
 		const response = await fetch(STATIC_GTFS_METADATA_URL, { signal: AbortSignal.timeout(10_000) });
 		if (response.ok) {
@@ -199,7 +210,7 @@ async function fetchSignature(url: string): Promise<string | null> {
 				metas?: { default?: { modified?: string; data_processed?: string } };
 			};
 			const published = metadata.metas?.default?.modified ?? metadata.metas?.default?.data_processed;
-			if (published) return published;
+			if (published) return { signature: published, publishedAt: toInstant(published) };
 		}
 	} catch {
 		// Métadonnées indisponibles : on se rabat sur ce que dit l'archive elle-même.
@@ -208,12 +219,37 @@ async function fetchSignature(url: string): Promise<string | null> {
 	try {
 		const response = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(10_000) });
 		if (!response.ok) return null;
-		return (
-			response.headers.get("etag") ?? response.headers.get("last-modified") ?? response.headers.get("content-length")
-		);
+
+		const lastModified = response.headers.get("last-modified");
+		const signature = response.headers.get("etag") ?? lastModified ?? response.headers.get("content-length");
+		if (signature === null) return null;
+
+		return { signature, publishedAt: lastModified === null ? undefined : toInstant(lastModified) };
 	} catch {
 		return null;
 	}
+}
+
+/**
+ * Une date de parution, quelle que soit la façon dont le portail l'écrit : un instant ISO, une date
+ * seule (« 2026-09-10 », rapportée à son minuit UTC), ou une date HTTP. `undefined` pour tout ce qui
+ * ne se lit pas comme une date — un ETag ou une taille d'archive.
+ */
+function toInstant(value: string): Temporal.Instant | undefined {
+	try {
+		return Temporal.Instant.from(value);
+	} catch {
+		// Pas un instant : on tente les deux autres écritures.
+	}
+
+	try {
+		return Temporal.PlainDate.from(value).toZonedDateTime("UTC").toInstant();
+	} catch {
+		// Pas une date ISO non plus.
+	}
+
+	const milliseconds = Date.parse(value);
+	return Number.isNaN(milliseconds) ? undefined : Temporal.Instant.fromEpochMilliseconds(milliseconds);
 }
 
 function emptyGtfs(): StaticGtfs {
@@ -233,14 +269,19 @@ function emptyGtfs(): StaticGtfs {
 	};
 }
 
-async function loadGtfs(url: string): Promise<{ data: StaticGtfs; signature: string | null }> {
+/** Version publiée de l'archive, et sa date de parution lorsque celle-ci se lit. */
+type Signature = { signature: string; publishedAt: Temporal.Instant | undefined };
+
+async function loadGtfs(
+	url: string,
+): Promise<{ data: StaticGtfs; signature: string | null; publishedAt: Temporal.Instant | undefined }> {
 	console.log("➔ Fetching static GTFS.");
 
 	try {
 		const response = await fetch(url);
 		if (!response.ok) {
 			console.error(`✘ Failed to fetch static GTFS (HTTP ${response.status}).`);
-			return { data: emptyGtfs(), signature: null };
+			return { data: emptyGtfs(), signature: null, publishedAt: undefined };
 		}
 
 		const buffer = new Uint8Array(await response.arrayBuffer());
@@ -258,7 +299,7 @@ async function loadGtfs(url: string): Promise<{ data: StaticGtfs; signature: str
 
 		if (!files["stops.txt"] || !files["trips.txt"] || !files["stop_times.txt"]) {
 			console.error("✘ Static GTFS is missing stops.txt, trips.txt or stop_times.txt.");
-			return { data: emptyGtfs(), signature: null };
+			return { data: emptyGtfs(), signature: null, publishedAt: undefined };
 		}
 
 		const decoder = new TextDecoder();
@@ -275,10 +316,11 @@ async function loadGtfs(url: string): Promise<{ data: StaticGtfs; signature: str
 			`✓ Loaded ${data.stops.size} stops, ${data.routes.size} routes, ${data.trips.size} trips, ${data.calendars.size} calendars from GTFS.`,
 		);
 
-		return { data, signature: await fetchSignature(url) };
+		const signature = await fetchSignature(url);
+		return { data, signature: signature?.signature ?? null, publishedAt: signature?.publishedAt };
 	} catch (cause) {
 		console.error("✘ Failed to load static GTFS!", cause);
-		return { data: emptyGtfs(), signature: null };
+		return { data: emptyGtfs(), signature: null, publishedAt: undefined };
 	}
 }
 
