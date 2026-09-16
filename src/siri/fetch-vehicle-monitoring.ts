@@ -26,6 +26,14 @@ export type MonitoredCall = {
 	expectedArrival: number | undefined;
 	aimedDeparture: number | undefined;
 	expectedDeparture: number | undefined;
+	/**
+	 * Horaires CONSTATÉS : l'heure à laquelle le véhicule est effectivement arrivé, et celle à laquelle
+	 * il est reparti. La source ne les publie que pour l'arrêt où il se trouve — à un terminus, elle y
+	 * remplace l'heure prévue, l'événement ayant eu lieu (cf. {@link EARLIEST_PLAUSIBLE_TIME} pour la
+	 * sentinelle qu'elle emploie quand il n'a pas encore eu lieu).
+	 */
+	actualArrival: number | undefined;
+	actualDeparture: number | undefined;
 	/** `onTime`, `delayed`, `cancelled`, `noReport`… tel que la source l'écrit. */
 	arrivalStatus: string;
 	departureStatus: string;
@@ -208,6 +216,8 @@ function toCall(raw: RawCall | undefined, current: boolean): MonitoredCall | und
 		expectedArrival: toEpochSeconds(raw.ExpectedArrivalTime),
 		aimedDeparture: toEpochSeconds(raw.AimedDepartureTime),
 		expectedDeparture: toEpochSeconds(raw.ExpectedDepartureTime),
+		actualArrival: toEpochSeconds(raw.ActualArrivalTime),
+		actualDeparture: toEpochSeconds(raw.ActualDepartureTime),
 		arrivalStatus: raw.ArrivalStatus ?? "",
 		departureStatus: raw.DepartureStatus ?? "",
 		boardingActivity: raw.DepartureBoardingActivity ?? "",

@@ -5,7 +5,8 @@ import type { MonitoredCall, MonitoredJourney } from "../siri/fetch-vehicle-moni
 import { buildModifications, modificationsId } from "./build-modifications.js";
 import type { TripMatch } from "./match-trip.js";
 import { isCallCancelled, isScheduledCall, type ResolvedCall, resolveCalls } from "./resolve-calls.js";
-import type { StaticGtfs } from "./use-static-gtfs.js";
+import { midnightOf } from "./service-days.js";
+import type { StaticGtfs, TripStop } from "./use-static-gtfs.js";
 
 const { VehicleStopStatus } = GtfsRealtime.transit_realtime.VehiclePosition;
 const TripSchedule = GtfsRealtime.transit_realtime.TripDescriptor.ScheduleRelationship;
@@ -57,6 +58,7 @@ export function buildEntities(gtfs: StaticGtfs, journey: MonitoredJourney, match
 	const trip = buildTripDescriptor(match, cancelled);
 	const vehicle = buildVehicleDescriptor(journey);
 	const currentCall = resolved.find(({ call }) => call.current);
+	const location = locateVehicle(gtfs, journey, match, currentCall, described);
 
 	// Les arrêts supplémentaires sortent de la course théorique : le rang qu'ils occupent y est celui
 	// d'un autre arrêt, et les annoncer là reviendrait à déplacer celui-ci. C'est la course modifiée qui
@@ -70,13 +72,12 @@ export function buildEntities(gtfs: StaticGtfs, journey: MonitoredJourney, match
 			position: journey.position,
 			// Le rang n'est publié que s'il est bien celui de la course annoncée : celui d'un arrêt
 			// supplémentaire appartient à un autre arrêt de l'horaire théorique.
-			currentStopSequence:
-				currentCall === undefined || described.has(currentCall) ? undefined : currentCall.stopSequence,
-			stopId: currentCall?.stopId,
-			currentStatus: currentCall === undefined ? undefined : stopStatus(journey, currentCall.call),
+			currentStopSequence: location?.stopSequence,
+			stopId: location?.stopId,
+			currentStatus: location?.status,
 			timestamp: journey.recordedAt,
 		},
-		tripUpdate: buildTripUpdate(journey, match, trip, vehicle, scheduledCalls, cancelled),
+		tripUpdate: buildTripUpdate(journey, match, trip, vehicle, scheduledCalls, cancelled, location),
 		tripModifications: modifications?.entity,
 		modifiedTripUpdate:
 			modifications?.entity === undefined
@@ -120,6 +121,89 @@ function buildVehicleDescriptor(journey: MonitoredJourney): GtfsRealtime.transit
 		// Le numéro de parc seul, tel qu'il se lit sur le véhicule : « Keolis_5210 » → « 5210 ».
 		label: journey.vehicleId.split("_").at(-1) ?? journey.vehicleId,
 	};
+}
+
+/** Où le flux situe le véhicule : le quai, son rang, et ce que le véhicule y fait. */
+type VehicleLocation = {
+	stopId: string;
+	stopSequence: number | undefined;
+	status: GtfsRealtime.transit_realtime.VehiclePosition.VehicleStopStatus;
+	/**
+	 * L'arrêt de l'horaire théorique où le véhicule est à quai, lorsque c'est lui qui le désigne et non
+	 * la source (cf. {@link locateVehicle}). La source ne publie plus cet arrêt — il est desservi —, et
+	 * c'est d'ici que la course tire de quoi l'annoncer quand même (cf. {@link stoppedAtUpdate}).
+	 */
+	deduced: TripStop | undefined;
+};
+
+/**
+ * Où situer le véhicule. La source ne publie que son PROCHAIN arrêt : tant qu'il n'a pas quitté le
+ * précédent, elle annonce déjà celui d'après, et le déclarer en route vers lui reviendrait à le faire
+ * partir avant l'heure — c'est ce qui se voit le mieux à un terminus, où un véhicule qui attend son
+ * départ serait annoncé roulant vers le deuxième arrêt de sa course.
+ *
+ * L'avancement sur le tronçon le dit (cf. {@link notYetDeparted}) : à zéro, le véhicule est à quai à
+ * l'arrêt précédent, que l'horaire théorique de la course désigne. Faute de cet arrêt — une course
+ * supplémentaire, ou un véhicule à son tout premier arrêt —, le prochain arrêt reste ce qu'on a de
+ * mieux.
+ */
+function locateVehicle(
+	gtfs: StaticGtfs,
+	journey: MonitoredJourney,
+	match: TripMatch,
+	currentCall: ResolvedCall | undefined,
+	described: ReadonlySet<ResolvedCall>,
+): VehicleLocation | undefined {
+	if (currentCall === undefined) return undefined;
+
+	// Le rang d'un arrêt supplémentaire appartient à un autre arrêt de l'horaire théorique : il ne
+	// désigne pas l'arrêt qui le précède, et rien ne dit alors d'où le véhicule vient.
+	const sequenced = !described.has(currentCall);
+
+	if (sequenced && notYetDeparted(journey, currentCall.call)) {
+		const previous = previousStop(match, currentCall.stopSequence);
+		if (previous !== undefined && gtfs.stops.has(previous.stopId)) {
+			return {
+				stopId: previous.stopId,
+				stopSequence: previous.stopSequence,
+				status: VehicleStopStatus.STOPPED_AT,
+				deduced: previous,
+			};
+		}
+	}
+
+	return {
+		stopId: currentCall.stopId,
+		stopSequence: sequenced ? currentCall.stopSequence : undefined,
+		status: stopStatus(journey, currentCall.call),
+		deduced: undefined,
+	};
+}
+
+/**
+ * Le véhicule n'a pas encore quitté l'arrêt précédent : la source n'annonce aucun avancement sur le
+ * tronçon qui mène au prochain arrêt, et la distance qui l'en sépare est ce tronçon tout entier. Les
+ * deux sont exigés ensemble — un avancement nul seul se lirait aussi bien comme une absence de
+ * mesure —, et le prochain arrêt doit bien être le prochain (`NumberOfStopsAway` à zéro).
+ */
+function notYetDeparted(journey: MonitoredJourney, call: MonitoredCall): boolean {
+	const { percentage, linkDistance } = journey.progress;
+	if (percentage !== 0 || (call.numberOfStopsAway ?? 0) !== 0) return false;
+	if (linkDistance === undefined || call.distanceFromStop === undefined) return false;
+
+	return call.distanceFromStop >= linkDistance;
+}
+
+/** L'arrêt que l'horaire théorique de la course place juste avant ce rang. */
+function previousStop(match: TripMatch, stopSequence: number): TripStop | undefined {
+	let previous: TripStop | undefined;
+
+	for (const stop of match.stops ?? []) {
+		if (stop.stopSequence >= stopSequence) continue;
+		if (previous === undefined || stop.stopSequence > previous.stopSequence) previous = stop;
+	}
+
+	return previous;
 }
 
 /**
@@ -183,6 +267,7 @@ function buildTripUpdate(
 	vehicle: GtfsRealtime.transit_realtime.IVehicleDescriptor,
 	resolved: ResolvedCall[],
 	cancelled: boolean,
+	location: VehicleLocation | undefined,
 ): GtfsRealtime.transit_realtime.ITripUpdate | undefined {
 	// Une course annulée ne dessert rien : le format veut qu'elle n'annonce aucun arrêt, et son retard
 	// n'a plus d'objet. Le descripteur porte à lui seul toute l'information.
@@ -193,6 +278,25 @@ function buildTripUpdate(
 	const stopTimeUpdate = resolved
 		.toSorted((a, b) => a.stopSequence - b.stopSequence)
 		.map((call) => toStopTimeUpdate(call, true));
+
+	// L'arrêt où le véhicule est à quai, quand c'est l'horaire théorique qui le désigne : la source ne
+	// l'annonce plus, et sans lui l'arrêt que le consommateur affiche en tête — celui où il montre le
+	// véhicule — serait le seul de la course sans temps réel.
+	// Borne : l'heure reconstituée ne peut pas dépasser celle du prochain arrêt annoncé, sans quoi la
+	// course décrirait un véhicule qui atteint son prochain arrêt avant d'avoir quitté le précédent.
+	const nextTime = stopTimeUpdate.find(
+		({ arrival, departure }) => arrival?.time !== undefined || departure?.time !== undefined,
+	);
+	const stopped = stoppedAtUpdate(
+		journey,
+		match,
+		location,
+		Number(nextTime?.arrival?.time ?? nextTime?.departure?.time) || undefined,
+	);
+	if (stopped !== undefined && !stopTimeUpdate.some(({ stopSequence }) => stopSequence === stopped.stopSequence)) {
+		stopTimeUpdate.unshift(stopped);
+	}
+
 	if (!stopTimeUpdate.some(({ scheduleRelationship }) => scheduleRelationship !== StopSchedule.NO_DATA)) {
 		return undefined;
 	}
@@ -209,6 +313,62 @@ function buildTripUpdate(
 		// aux courses dédoublées, et le descripteur les porte déjà.
 		tripProperties: match.scheduled || !match.headsign ? undefined : { tripHeadsign: match.headsign },
 	};
+}
+
+/**
+ * L'arrêt où le véhicule est à quai, annoncé depuis l'horaire théorique. La source ne publie plus cet
+ * arrêt — il est desservi —, mais elle publie le retard de la course : l'horaire théorique décalé de ce
+ * retard est l'heure à laquelle le véhicule y est, et c'est de cette même règle que la source tire les
+ * heures qu'elle annonce aux arrêts suivants.
+ *
+ * `undefined` hors de ce cas, et pour une course dont on ne saurait pas dater la journée de service :
+ * sans minuit de référence, un horaire en secondes depuis minuit ne se rapporte à aucun instant.
+ */
+function stoppedAtUpdate(
+	journey: MonitoredJourney,
+	match: TripMatch,
+	location: VehicleLocation | undefined,
+	notAfter: number | undefined,
+): GtfsRealtime.transit_realtime.TripUpdate.IStopTimeUpdate | undefined {
+	const stop = location?.deduced;
+	if (stop === undefined) return undefined;
+
+	const midnight = midnightOf(match.startDate);
+	if (midnight === undefined) return undefined;
+
+	// Un retard que la source ne donne pas est tenu pour nul : l'horaire théorique reste ce qu'il y a de
+	// plus juste à annoncer pour un arrêt qu'elle a cessé de publier.
+	const delay = journey.delaySeconds ?? 0;
+	const arrival = toScheduledEvent(stop.arrival, midnight, delay, notAfter);
+	const departure = toScheduledEvent(stop.departure, midnight, delay, notAfter);
+	if (arrival === undefined && departure === undefined) return undefined;
+
+	return {
+		stopId: stop.stopId,
+		stopSequence: stop.stopSequence,
+		arrival,
+		departure,
+		scheduleRelationship: StopSchedule.SCHEDULED,
+	};
+}
+
+/**
+ * Un horaire théorique de l'horaire GTFS, décalé du retard de la course, sans dépasser l'heure du
+ * prochain arrêt annoncé. Le retard publié est celui qui s'ensuit, de sorte qu'il concorde toujours
+ * avec l'heure et l'horaire théorique qui l'encadrent.
+ */
+function toScheduledEvent(
+	secondsFromMidnight: number,
+	midnight: number,
+	delay: number,
+	notAfter: number | undefined,
+): GtfsRealtime.transit_realtime.TripUpdate.IStopTimeEvent | undefined {
+	if (!Number.isFinite(secondsFromMidnight)) return undefined;
+
+	const scheduledTime = midnight + secondsFromMidnight;
+	const time = notAfter === undefined ? scheduledTime + delay : Math.min(scheduledTime + delay, notAfter);
+
+	return { time, delay: time - scheduledTime, scheduledTime };
 }
 
 /**
@@ -261,8 +421,13 @@ function toStopTimeUpdate(
 		return { ...stop, scheduleRelationship: StopSchedule.SKIPPED };
 	}
 
-	const arrival = toStopTimeEvent(call.expectedArrival, call.aimedArrival);
-	const departure = toStopTimeEvent(call.expectedDeparture, call.aimedDeparture);
+	// L'heure constatée l'emporte sur l'heure prévue — c'est une prévision qui s'est réalisée —, et
+	// surtout elle est parfois la SEULE que la source publie : à l'arrêt où se trouve le véhicule, et
+	// singulièrement à un terminus, elle annonce l'heure à laquelle il est arrivé plutôt qu'une heure
+	// d'arrivée à venir. Sans ce recours, le premier arrêt d'une course au départ n'aurait aucun temps
+	// réel à publier.
+	const arrival = toStopTimeEvent(call.actualArrival ?? call.expectedArrival, call.aimedArrival);
+	const departure = toStopTimeEvent(call.actualDeparture ?? call.expectedDeparture, call.aimedDeparture);
 
 	// Aucun horaire annoncé : la source dit expressément n'avoir rien à en dire (`noReport`), le plus
 	// souvent du départ d'un véhicule arrivé à son terminus.

@@ -327,6 +327,8 @@ function scheduledCallTime(call: MonitoredCall, delaySeconds: number | undefined
 	const aimed = call.aimedArrival ?? call.aimedDeparture;
 	if (aimed !== undefined) return aimed;
 
-	const expected = call.expectedArrival ?? call.expectedDeparture;
-	return expected === undefined ? undefined : expected - (delaySeconds ?? 0);
+	// L'heure constatée fait aussi bien l'affaire que l'heure prévue — c'est la même heure, une fois
+	// l'événement survenu —, et à l'arrêt où se trouve le véhicule elle est parfois la seule publiée.
+	const observed = call.expectedArrival ?? call.expectedDeparture ?? call.actualArrival ?? call.actualDeparture;
+	return observed === undefined ? undefined : observed - (delaySeconds ?? 0);
 }
