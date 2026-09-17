@@ -35,7 +35,7 @@ export const SIRI_TIMEOUT = Temporal.Duration.from({ seconds: 10 }).total("milli
  * relevés — `ValidUntilTime`, trente secondes après `RecordedAtTime` — et interroger plus souvent ne
  * ferait que redemander la même donnée.
  */
-export const POLL_INTERVAL = Temporal.Duration.from({ seconds: 60 }).total("milliseconds");
+export const POLL_INTERVAL = Temporal.Duration.from({ seconds: 40 }).total("milliseconds");
 
 /**
  * Durée de validité de la liste des lignes suivies, rendue par `LinesDiscovery`. Le réseau ne change
