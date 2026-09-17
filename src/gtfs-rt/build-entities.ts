@@ -117,7 +117,8 @@ function buildTripDescriptor(match: TripMatch, cancelled: boolean): GtfsRealtime
 	};
 }
 
-function buildVehicleDescriptor(journey: MonitoredJourney): GtfsRealtime.transit_realtime.IVehicleDescriptor {
+/** Le véhicule tel que le feed le désigne : sa référence SAE, et son numéro de parc pour libellé. */
+export function buildVehicleDescriptor(journey: MonitoredJourney): GtfsRealtime.transit_realtime.IVehicleDescriptor {
 	return {
 		id: journey.vehicleId,
 		// Le numéro de parc seul, tel qu'il se lit sur le véhicule : « Keolis_5210 » → « 5210 ».

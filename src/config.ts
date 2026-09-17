@@ -86,6 +86,35 @@ export const VEHICLE_RETENTION = Temporal.Duration.from({ minutes: 30 }).total("
 export const TRIP_RETENTION = Temporal.Duration.from({ minutes: 10 }).total("seconds");
 
 /**
+ * Retard minimal, en secondes, à partir duquel une course est tenue pour en retard — pour la reporter
+ * sur les courses suivantes du même bloc comme pour la publier. En deçà, l'écart relève du bruit du
+ * SAE, et l'annoncer ferait clignoter des prévisions qui ne disent rien.
+ */
+export const PROPAGATED_DELAY_MIN = 60;
+
+/**
+ * Nombre de courses du bloc sur lesquelles un retard est reporté, au plus. Le report suppose que le
+ * conducteur ne rattrape rien, ce qui se vérifie sur la course suivante et de moins en moins ensuite :
+ * une relève, une pause allongée ou un simple tour de roue plus vif finissent par effacer le retard, et
+ * l'annoncer trois courses plus loin serait affirmer plus que ce que l'on sait.
+ */
+export const PROPAGATION_MAX_TRIPS = 3;
+
+/**
+ * Horizon du report, en secondes : une course qui part au-delà n'est pas annoncée. Le SAE reprendra la
+ * main bien avant — il publie le véhicule dès sa prise de service —, et une prévision faite deux heures
+ * à l'avance vaut moins que le silence.
+ */
+export const PROPAGATION_HORIZON = Temporal.Duration.from({ hours: 2 }).total("seconds");
+
+/**
+ * Incertitude déclarée sur les horaires reportés, en secondes (`uncertainty` du format). Elle distingue
+ * une prévision déduite du bloc — que rien n'a observée — des horaires que le SAE annonce vraiment, et
+ * laisse au consommateur de quoi les afficher différemment.
+ */
+export const PROPAGATED_UNCERTAINTY = 300;
+
+/**
  * Distance restante, en mètres, en deçà de laquelle le véhicule est annoncé à quai. La source publie
  * cette distance pour son prochain arrêt (`DistanceFromStop`), ce qui dispense de tout calcul
  * géométrique — et de charger les tracés du GTFS.

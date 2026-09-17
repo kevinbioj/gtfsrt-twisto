@@ -18,6 +18,7 @@ import { type BuiltEntities, buildEntities } from "./gtfs-rt/build-entities.js";
 import { modificationsId } from "./gtfs-rt/build-modifications.js";
 import { handleRequest } from "./gtfs-rt/handle-request.js";
 import { matchTrip, type TripMatch } from "./gtfs-rt/match-trip.js";
+import { type PredictedTrip, propagateDelay } from "./gtfs-rt/propagate-delay.js";
 import { serviceDays } from "./gtfs-rt/service-days.js";
 import { tripKeepUntil, useRealtimeStore, vehicleKeepUntil } from "./gtfs-rt/use-realtime-store.js";
 import { useStaticGtfs } from "./gtfs-rt/use-static-gtfs.js";
@@ -100,6 +101,13 @@ console.log(`➔ Listening on :${PORT}`);
 
 // ---
 
+/**
+ * Les courses dont le dernier relevé a publié un retard DÉDUIT de leur bloc. Elles se retirent d'elles-
+ * mêmes dès que le relevé suivant ne les reconduit pas : le véhicule qui les précède a rattrapé son
+ * retard, et laisser vieillir la prévision annoncerait un retard que plus rien n'appuie.
+ */
+let predictedTripKeys = new Set<string>();
+
 async function poll() {
 	let journeys: MonitoredJourney[];
 
@@ -135,6 +143,9 @@ async function poll() {
 	let modified = 0;
 	let staleRecords = 0;
 	let silentTrips = 0;
+	const predictions: PredictedTrip[] = [];
+	// Ce que la source a dit elle-même de chaque course : une prévision ne s'y substitue jamais.
+	const observedTripKeys = new Set<string>();
 	const recoveredStops = new Set<string>();
 	const addedStops = new Set<string>();
 	const undescribedStops = new Set<string>();
@@ -172,16 +183,18 @@ async function poll() {
 		// plus relevée alors que son horaire la fait encore rouler.
 		const keepUntil = tripKeepUntil(journey.recordedAt, match.endsAt);
 
+		// L'identifiant porte la journée de service : deux occurrences d'une même course peuvent circuler
+		// ensemble — celle d'hier qui s'achève après minuit et celle d'aujourd'hui qui part à « 25:10 » —
+		// et sous un identifiant nu, la seconde écraserait la première.
+		const tripKey = `ET:${FEED_PREFIX}:${match.tripId}:${match.startDate}`;
+		// La source parle d'elle-même de cette course : aucune prévision ne s'y substituera, quand bien
+		// même elle n'aurait aucun horaire à en dire.
+		observedTripKeys.add(tripKey);
+
 		if (built.tripUpdate === undefined) {
 			silentTrips += 1;
 		} else {
-			// L'identifiant porte la journée de service : deux occurrences d'une même course peuvent
-			// circuler ensemble — celle d'hier qui s'achève après minuit et celle d'aujourd'hui qui part à
-			// « 25:10 » — et sous un identifiant nu, la seconde écraserait la première.
-			store.tripUpdates.set(`ET:${FEED_PREFIX}:${match.tripId}:${match.startDate}`, {
-				entity: built.tripUpdate,
-				keepUntil,
-			});
+			store.tripUpdates.set(tripKey, { entity: built.tripUpdate, keepUntil });
 		}
 
 		// La course s'écarte de son horaire théorique : les modifications qui l'en séparent, et la course
@@ -206,9 +219,14 @@ async function poll() {
 			}
 		}
 
+		// Le véhicule assurera d'autres courses après celle-ci : son retard les concerne déjà, et la
+		// source n'en dira rien avant qu'il ne s'y déclare en service (cf. `propagate-delay.ts`).
+		if (!built.cancelled) predictions.push(...propagateDelay(gtfs, journey, match, now));
+
 		console.log(`\t⛛ ${describeJourney(journey, match, built)}`);
 	}
 
+	const predicted = publishPredictions(predictions, observedTripKeys);
 	const forgotten = store.sweep(now);
 
 	if (recoveredStops.size > 0) {
@@ -225,8 +243,39 @@ async function poll() {
 	}
 
 	console.log(
-		`✓ ${store.publishedVehiclePositions(now).size} positions, ${store.publishedTripUpdates(now).size} trip updates (${scheduled} scheduled, ${extra} extra, ${cancelled} cancelled, ${modified} modified, ${ambiguous} ambiguous, ${staleRecords} stale records, ${silentTrips} without realtime, ${forgotten} forgotten).`,
+		`✓ ${store.publishedVehiclePositions(now).size} positions, ${store.publishedTripUpdates(now).size} trip updates (${scheduled} scheduled, ${extra} extra, ${cancelled} cancelled, ${modified} modified, ${predicted} predicted from blocks, ${ambiguous} ambiguous, ${staleRecords} stale records, ${silentTrips} without realtime, ${forgotten} forgotten).`,
 	);
+}
+
+/**
+ * Publie les retards déduits des blocs, et retire ceux que ce relevé ne reconduit pas. Renvoie le
+ * nombre de courses annoncées en retard sans avoir été observées.
+ *
+ * Une prévision ne se substitue jamais à ce que la source dit : la course que le SAE annonce lui-même —
+ * son véhicule vient de s'y déclarer en service — a toujours raison, et la prévision qui la visait
+ * disparaît en même temps qu'elle est remplacée.
+ */
+function publishPredictions(predictions: PredictedTrip[], observedTripKeys: ReadonlySet<string>): number {
+	const keys = new Set<string>();
+
+	for (const prediction of predictions) {
+		const key = `ET:${FEED_PREFIX}:${prediction.tripId}:${prediction.startDate}`;
+		if (observedTripKeys.has(key)) continue;
+
+		store.tripUpdates.set(key, {
+			entity: prediction.entity,
+			keepUntil: tripKeepUntil(prediction.recordedAt, prediction.endsAt),
+		});
+		keys.add(key);
+	}
+
+	for (const key of predictedTripKeys) {
+		if (keys.has(key) || observedTripKeys.has(key)) continue;
+		store.tripUpdates.delete(key);
+	}
+	predictedTripKeys = keys;
+
+	return keys.size;
 }
 
 /** Le véhicule tel qu'il s'écrit au journal : sa course, où il en est, et son retard. */

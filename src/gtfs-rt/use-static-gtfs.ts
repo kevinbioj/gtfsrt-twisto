@@ -56,6 +56,17 @@ export type StaticGtfs = {
 	tripDepartures: Map<string, number>;
 	/** tripId → arrivée au dernier arrêt, dans la même unité que {@link tripDepartures}. */
 	tripArrivals: Map<string, number>;
+	/**
+	 * tripId → bloc dont elle fait partie, tel que {@link blockKey} l'écrit. Absente pour une course sans
+	 * `block_id` — le GTFS n'en impose pas.
+	 */
+	tripBlock: Map<string, string>;
+	/**
+	 * Bloc → courses qu'un même véhicule y enchaîne, dans l'ordre de leurs départs théoriques. C'est de
+	 * là que se déduit le retard d'une course que le SAE n'annonce pas encore : elle succède, sur le même
+	 * véhicule, à une course dont on sait déjà qu'elle finira en retard (cf. `propagate-delay.ts`).
+	 */
+	blockTrips: Map<string, string[]>;
 	calendars: Map<string, ServiceCalendar>;
 	/** serviceId → date `AAAAMMJJ` → {@link SERVICE_ADDED} ou {@link SERVICE_REMOVED}. */
 	calendarExceptions: Map<string, Map<string, number>>;
@@ -79,6 +90,15 @@ export function originKey(routeId: string, stopId: string, departure: number): s
 
 export function departureKey(routeId: string, departure: number): string {
 	return `${routeId}|${departure}`;
+}
+
+/**
+ * Le bloc auquel appartient une course. Le service y entre avec l'identifiant : un même `block_id` sert
+ * parfois à deux services — l'été et l'hiver, la semaine et le dimanche —, et leurs courses n'ont alors
+ * rien à voir les unes avec les autres.
+ */
+export function blockKey(serviceId: string, blockId: string): string {
+	return `${serviceId}|${blockId}`;
 }
 
 /**
@@ -291,6 +311,8 @@ function emptyGtfs(): StaticGtfs {
 		tripStops: new Map(),
 		tripDepartures: new Map(),
 		tripArrivals: new Map(),
+		tripBlock: new Map(),
+		blockTrips: new Map(),
 		calendars: new Map(),
 		calendarExceptions: new Map(),
 		originIndex: new Map(),
@@ -418,6 +440,7 @@ function buildTrips(csv: string, gtfs: StaticGtfs) {
 	const headsignCol = header.indexOf("trip_headsign");
 	const directionCol = header.indexOf("direction_id");
 	const shapeCol = header.indexOf("shape_id");
+	const blockCol = header.indexOf("block_id");
 	if (tripCol === -1 || routeCol === -1) return;
 
 	for (const row of rows) {
@@ -425,11 +448,15 @@ function buildTrips(csv: string, gtfs: StaticGtfs) {
 		const routeId = row[routeCol];
 		if (!tripId || !routeId) continue;
 
+		const serviceId = serviceCol === -1 ? "" : (row[serviceCol] ?? "");
+		const blockId = blockCol === -1 ? "" : (row[blockCol] ?? "").trim();
+		if (blockId !== "") gtfs.tripBlock.set(tripId, blockKey(serviceId, blockId));
+
 		gtfs.trips.set(tripId, {
 			routeId,
 			directionId: directionCol === -1 ? 0 : Number.parseInt(row[directionCol] ?? "", 10) || 0,
 			headsign: headsignCol === -1 ? "" : (row[headsignCol] ?? ""),
-			serviceId: serviceCol === -1 ? "" : (row[serviceCol] ?? ""),
+			serviceId,
 			shapeId: shapeCol === -1 ? "" : (row[shapeCol] ?? ""),
 		});
 	}
@@ -548,6 +575,14 @@ function buildStopTimes(csv: string, gtfs: StaticGtfs) {
 			push(gtfs.departureIndex, departureKey(meta.routeId, first.departure), tripId);
 		}
 		if (Number.isFinite(last.arrival)) gtfs.tripArrivals.set(tripId, last.arrival);
+
+		// Le bloc n'est ordonné qu'ici : il se trie sur les départs, que seul `stop_times.txt` donne.
+		const block = gtfs.tripBlock.get(tripId);
+		if (block !== undefined && Number.isFinite(first.departure)) push(gtfs.blockTrips, block, tripId);
+	}
+
+	for (const trips of gtfs.blockTrips.values()) {
+		trips.sort((a, b) => (gtfs.tripDepartures.get(a) ?? 0) - (gtfs.tripDepartures.get(b) ?? 0));
 	}
 }
 
