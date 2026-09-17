@@ -18,7 +18,7 @@ export const SIRI_API_KEY = process.env.SIRI_API_KEY ?? "";
 /**
  * Chemin d'une réponse `GetVehicleMonitoring` enregistrée, à rejouer au lieu d'interroger le service.
  * De quoi développer et vérifier le producteur sans endpoint — la péremption des relevés est alors
- * levée, l'enregistrement datant nécessairement d'avant (cf. {@link VEHICLE_STALENESS}).
+ * levée, l'enregistrement datant nécessairement d'avant (cf. {@link RECORD_STALENESS}).
  */
 export const SIRI_FIXTURE_PATH = process.env.SIRI_FIXTURE_PATH;
 
@@ -63,10 +63,27 @@ export const STATIC_GTFS_METADATA_URL =
 export const GTFS_CHECK_INTERVAL = Temporal.Duration.from({ minutes: 5 }).total("milliseconds");
 
 /**
- * Âge au-delà duquel un relevé n'est plus diffusé, en secondes. Que la source cesse de réhorodater un
- * véhicule est un aveu : elle l'a perdu. Les entrées plus vieilles sortent du feed et sont oubliées.
+ * Âge au-delà duquel un relevé n'est plus repris, en secondes. Que la source cesse de réhorodater un
+ * véhicule est un aveu : elle l'a perdu, et ce qu'elle en dit encore ne vaut plus d'être publié.
  */
-export const VEHICLE_STALENESS = Temporal.Duration.from({ minutes: 10 }).total("seconds");
+export const RECORD_STALENESS = Temporal.Duration.from({ minutes: 10 }).total("seconds");
+
+/**
+ * Durée pendant laquelle un véhicule reste au feed après son dernier relevé, en secondes. Une position
+ * n'est pas retirée parce que la source a cessé de la publier : un véhicule qui rentre au dépôt, une
+ * course qui s'achève, un trou de couverture se ressemblent tous vus du producteur, et le consommateur
+ * qui rafraîchit toutes les minutes doit pouvoir constater la fin d'un service plutôt que de voir le
+ * véhicule s'évaporer entre deux relevés.
+ */
+export const VEHICLE_RETENTION = Temporal.Duration.from({ minutes: 30 }).total("seconds");
+
+/**
+ * Délai de garde d'une course, en secondes. Il court depuis son dernier relevé ET depuis sa fin
+ * théorique : une course qui termine en avance cesse d'être publiée par la source alors que son horaire
+ * la fait encore rouler, et la retirer aussitôt la ferait disparaître des écrans avant l'heure à
+ * laquelle le voyageur l'attend. La plus tardive des deux échéances l'emporte (cf. `useRealtimeStore`).
+ */
+export const TRIP_RETENTION = Temporal.Duration.from({ minutes: 10 }).total("seconds");
 
 /**
  * Distance restante, en mètres, en deçà de laquelle le véhicule est annoncé à quai. La source publie

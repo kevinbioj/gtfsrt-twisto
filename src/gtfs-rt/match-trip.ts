@@ -28,6 +28,13 @@ export type TripMatch = {
 	headsign: string;
 	/** Horaire théorique de la course ; `undefined` pour une course supplémentaire. */
 	stops: TripStop[] | undefined;
+	/**
+	 * Instant, en secondes epoch, où l'horaire théorique fait arriver la course à son terminus.
+	 * `undefined` pour une course supplémentaire, qu'aucun horaire ne décrit. Le producteur s'en sert
+	 * pour garder la course au feed jusqu'à cette heure passée, même terminée en avance (cf.
+	 * `tripKeepUntil`).
+	 */
+	endsAt: number | undefined;
 	by: MatchedBy;
 	/** Plusieurs courses du GTFS convenaient également : celle retenue peut n'être pas la bonne. */
 	ambiguous: boolean;
@@ -75,6 +82,7 @@ export function matchTrip(gtfs: StaticGtfs, days: readonly ServiceDay[], journey
 			startTime: formatServiceTime(gtfs.tripDepartures.get(journey.journeyName) ?? 0),
 			headsign: known.headsign || journey.destinationName,
 			stops: gtfs.tripStops.get(journey.journeyName),
+			endsAt: scheduledEnd(gtfs, journey.journeyName, midnightOf(startDate)),
 			by: "trip-id",
 			ambiguous: false,
 		};
@@ -133,6 +141,7 @@ function matchByDeparture(
 			startTime: formatServiceTime(departure),
 			headsign: meta?.headsign || journey.destinationName,
 			stops: gtfs.tripStops.get(tripId),
+			endsAt: scheduledEnd(gtfs, tripId, day.midnight),
 			by,
 			ambiguous: narrowed.length > 1,
 		};
@@ -158,9 +167,22 @@ function extraTrip(journey: MonitoredJourney, routeId: string | undefined, refer
 		startTime: formatServiceTime(midnight === undefined ? 0 : reference - midnight),
 		headsign: journey.destinationName,
 		stops: undefined,
+		endsAt: undefined,
 		by: "none",
 		ambiguous: false,
 	};
+}
+
+/**
+ * L'instant où l'horaire théorique fait arriver la course à son terminus : l'arrivée au dernier arrêt,
+ * que le GTFS compte en secondes depuis le minuit de la journée de service, posée sur ce minuit-là.
+ * `undefined` faute de l'un ou de l'autre.
+ */
+function scheduledEnd(gtfs: StaticGtfs, tripId: string, midnight: number | undefined): number | undefined {
+	const arrival = gtfs.tripArrivals.get(tripId);
+	if (arrival === undefined || midnight === undefined) return undefined;
+
+	return midnight + arrival;
 }
 
 /** Ne garde que les courses dont le service circule bien ce jour-là. */

@@ -10,16 +10,16 @@ import {
 	GTFS_CHECK_INTERVAL,
 	POLL_INTERVAL,
 	PORT,
+	RECORD_STALENESS,
 	SIRI_FIXTURE_PATH,
 	STATIC_GTFS_URL,
-	VEHICLE_STALENESS,
 } from "./config.js";
 import { type BuiltEntities, buildEntities } from "./gtfs-rt/build-entities.js";
 import { modificationsId } from "./gtfs-rt/build-modifications.js";
 import { handleRequest } from "./gtfs-rt/handle-request.js";
 import { matchTrip, type TripMatch } from "./gtfs-rt/match-trip.js";
 import { serviceDays } from "./gtfs-rt/service-days.js";
-import { useRealtimeStore } from "./gtfs-rt/use-realtime-store.js";
+import { tripKeepUntil, useRealtimeStore, vehicleKeepUntil } from "./gtfs-rt/use-realtime-store.js";
 import { useStaticGtfs } from "./gtfs-rt/use-static-gtfs.js";
 import { fetchVehicleMonitoring, type MonitoredJourney } from "./siri/fetch-vehicle-monitoring.js";
 
@@ -142,7 +142,7 @@ async function poll() {
 
 	for (const journey of journeys) {
 		// Que la source cesse elle-même de réhorodater un véhicule est un aveu : elle l'a perdu.
-		if (!FIXTURE_MODE && now - journey.recordedAt > VEHICLE_STALENESS) {
+		if (!FIXTURE_MODE && now - journey.recordedAt > RECORD_STALENESS) {
 			staleRecords += 1;
 			continue;
 		}
@@ -160,10 +160,17 @@ async function poll() {
 		for (const stop of built.undescribedStops) undescribedStops.add(stop);
 		for (const stop of built.unknownStops) unknownStops.add(stop);
 
+		// Le véhicule reste au feed une demi-heure après ce relevé : ce n'est pas parce que la source
+		// cesse de le publier — fin de service, rentrée au dépôt — qu'il faut le faire disparaître dans
+		// l'intervalle de deux rafraîchissements.
 		store.vehiclePositions.set(`VM:${FEED_PREFIX}:${journey.vehicleId}`, {
 			entity: built.vehiclePosition,
-			recordedAt: journey.recordedAt,
+			keepUntil: vehicleKeepUntil(journey.recordedAt),
 		});
+
+		// Les courses, elles, survivent aussi à leur fin théorique : une course terminée en avance n'est
+		// plus relevée alors que son horaire la fait encore rouler.
+		const keepUntil = tripKeepUntil(journey.recordedAt, match.endsAt);
 
 		if (built.tripUpdate === undefined) {
 			silentTrips += 1;
@@ -173,7 +180,7 @@ async function poll() {
 			// « 25:10 » — et sous un identifiant nu, la seconde écraserait la première.
 			store.tripUpdates.set(`ET:${FEED_PREFIX}:${match.tripId}:${match.startDate}`, {
 				entity: built.tripUpdate,
-				recordedAt: journey.recordedAt,
+				keepUntil,
 			});
 		}
 
@@ -183,18 +190,18 @@ async function poll() {
 		if (built.tripModifications === undefined) {
 			// La course a rejoint son itinéraire — la source n'annonce plus que des arrêts théoriques : ce
 			// qui l'en écartait n'a plus cours, et le laisser vieillir dans le store ferait doublon avec la
-			// course théorique pendant dix minutes.
+			// course théorique jusqu'à son échéance.
 			store.tripModifications.delete(modificationsId(match));
 			store.tripUpdates.delete(modifiedTripKey);
 		} else {
 			store.tripModifications.set(modificationsId(match), {
 				entity: built.tripModifications,
-				recordedAt: journey.recordedAt,
+				keepUntil,
 			});
 			if (built.modifiedTripUpdate !== undefined) {
 				store.tripUpdates.set(modifiedTripKey, {
 					entity: built.modifiedTripUpdate,
-					recordedAt: journey.recordedAt,
+					keepUntil,
 				});
 			}
 		}
