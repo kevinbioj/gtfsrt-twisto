@@ -61,9 +61,11 @@ export function buildEntities(gtfs: StaticGtfs, journey: MonitoredJourney, match
 	const location = locateVehicle(gtfs, journey, match, currentCall, described);
 
 	// Les arrêts supplémentaires sortent de la course théorique : le rang qu'ils occupent y est celui
-	// d'un autre arrêt, et les annoncer là reviendrait à déplacer celui-ci. C'est la course modifiée qui
-	// en rend compte.
-	const scheduledCalls = resolved.filter((call) => !described.has(call) || isScheduledCall(call));
+	// d'un autre arrêt, et les annoncer là reviendrait à déplacer celui-ci — c'est la course modifiée qui
+	// en rend compte. Les quais que le GTFS ignore, eux, ne se désignent pas du tout. Ni les uns ni les
+	// autres n'ont leur place dans la course théorique, qu'une modification sache ou non les décrire : le
+	// format ne lui laisse dire que ce que l'horaire théorique porte déjà.
+	const scheduledCalls = resolved.filter(isScheduledCall);
 
 	return {
 		vehiclePosition: {
@@ -154,7 +156,10 @@ function locateVehicle(
 	currentCall: ResolvedCall | undefined,
 	described: ReadonlySet<ResolvedCall>,
 ): VehicleLocation | undefined {
-	if (currentCall === undefined) return undefined;
+	// Un quai que le GTFS ignore ne se publie pas : l'identifiant qu'annonce la source ne renvoie à rien
+	// chez le consommateur. Mieux vaut ne pas situer le véhicule que le situer là où personne ne peut
+	// aller voir — sa position, elle, reste publiée.
+	if (currentCall === undefined || currentCall.resolution === "unknown") return undefined;
 
 	// Le rang d'un arrêt supplémentaire appartient à un autre arrêt de l'horaire théorique : il ne
 	// désigne pas l'arrêt qui le précède, et rien ne dit alors d'où le véhicule vient.

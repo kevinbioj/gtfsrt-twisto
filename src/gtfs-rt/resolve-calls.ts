@@ -11,14 +11,18 @@ import { resolveStopId, type StaticGtfs, sameStation, stopSequenceOf } from "./u
  *  - `added` : le quai existe dans le GTFS, mais la course ne le dessert pas — un arrêt supplémentaire,
  *    que le système de modifications de course sait décrire (cf. `build-modifications.ts`) ;
  *  - `unknown` : le GTFS ignore jusqu'au quai lui-même — il lui arrive d'avoir un arrêt de retard sur le
- *    terrain. Rien ne permet alors de le décrire, et ce que la source annonce est relayé tel quel.
+ *    terrain. Rien ne permet alors de le désigner : un identifiant que le GTFS ne porte pas ne renvoie
+ *    à rien chez le consommateur, et l'arrêt n'est pas publié (cf. `build-entities.ts`).
  */
 export type CallResolution = "gtfs" | "sequence" | "added" | "unknown";
 
 /** Un arrêt annoncé, rapproché de l'horaire théorique de la course. */
 export type ResolvedCall = {
 	call: MonitoredCall;
-	/** Identifiant GTFS du quai, ou la référence du SAE en minuscules lorsque rien ne la rattache. */
+	/**
+	 * Identifiant GTFS du quai, ou la référence du SAE en minuscules lorsque rien ne la rattache — cette
+	 * dernière ne se publie pas (`unknown`), elle ne sert qu'au journal.
+	 */
 	stopId: string;
 	/** Rang dans la course ; celui du GTFS pour un arrêt qu'elle dessert, celui du SAE sinon. */
 	stopSequence: number;
@@ -63,7 +67,10 @@ export function resolveCalls(gtfs: StaticGtfs, journey: MonitoredJourney, match:
 		// qui doit être publié : lui seul se retrouve chez le consommateur. Un quai d'un AUTRE arrêt, lui,
 		// est un arrêt supplémentaire, et le rang qu'il occupe ne lui appartient pas.
 		const atOrder = stops.find(({ stopSequence: sequence }) => sequence === call.order);
-		if (atOrder !== undefined && sameStation(gtfs, { stopId, stopName: call.stopName }, atOrder.stopId)) {
+		if (
+			atOrder !== undefined &&
+			sameStation(gtfs, { stopId, stopRef: call.stopRef, stopName: call.stopName }, atOrder.stopId)
+		) {
 			return { call, stopId: atOrder.stopId, stopSequence: atOrder.stopSequence, resolution: "sequence" };
 		}
 

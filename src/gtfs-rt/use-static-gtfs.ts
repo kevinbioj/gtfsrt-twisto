@@ -101,13 +101,23 @@ export function resolveRouteId(gtfs: StaticGtfs, lineName: string): string | und
 /**
  * Deux quais sont-ils le même point d'arrêt ? Le SAE et le GTFS ne numérotent pas toujours les quais
  * d'un même arrêt de la même façon — « NOKA12 » pour « noka11 » —, et c'est leur station parente qui
- * les réunit. Le quai annoncé étant parfois inconnu du GTFS, son libellé sert alors de recours : les
- * deux noms sont rapprochés sans considération de casse ni d'accents, et l'un peut préciser l'autre
- * (« Buron » pour « Buron (anc. Arromanches) »).
+ * les réunit.
+ *
+ * Le quai annoncé étant parfois inconnu du GTFS, deux recours prennent le relais :
+ *
+ *  - le **code d'arrêt** que porte la référence, une fois son numéro de quai retiré : « BAMA02 » et
+ *    « bama01 » sont les deux quais de « Bas Manoir », dont le GTFS ne décrit que le second. C'est le
+ *    recours qui porte, la source ne publiant le libellé de ses arrêts que pour le prochain ;
+ *  - le **libellé**, quand elle le donne : les deux noms sont rapprochés sans considération de casse ni
+ *    d'accents, et l'un peut préciser l'autre (« Buron » pour « Buron (anc. Arromanches) »).
+ *
+ * Une quinzaine de codes désignent bien deux arrêts distincts (« jufe01 » Jules Ferry et « jufe02 »
+ * Jean Effel) : c'est à l'appelant de n'interroger que le quai que la course dessert au rang annoncé,
+ * lequel ne laisse pas de place à la confusion (cf. `resolveCalls`).
  */
 export function sameStation(
 	gtfs: StaticGtfs,
-	announced: { stopId: string | undefined; stopName: string },
+	announced: { stopId: string | undefined; stopRef: string; stopName: string },
 	stopId: string,
 ): boolean {
 	const other = gtfs.stops.get(stopId);
@@ -120,11 +130,30 @@ export function sameStation(
 		return meta !== undefined && meta.parentStation !== "" && meta.parentStation === other.parentStation;
 	}
 
+	if (sameStopCode(announced.stopRef, stopId)) return true;
+
 	const name = normalizeName(announced.stopName);
 	const reference = normalizeName(other.name);
 	if (name === "" || reference === "") return false;
 
 	return name.startsWith(reference) || reference.startsWith(name);
+}
+
+/**
+ * Deux références de quai portent-elles le même code d'arrêt ? Le réseau les écrit « code + numéro de
+ * quai » (« bama01 », « bama02 ») : le numéro retiré, ce qui reste nomme l'arrêt. Un code trop court
+ * pour nommer quoi que ce soit — tout en chiffres, ou réduit à une lettre — ne rapproche rien.
+ */
+function sameStopCode(announcedRef: string, stopId: string): boolean {
+	const code = stopCode(announcedRef);
+	return code.length >= MIN_STOP_CODE_LENGTH && code === stopCode(stopId);
+}
+
+/** Longueur en deçà de laquelle un code d'arrêt ne distingue plus rien. */
+const MIN_STOP_CODE_LENGTH = 3;
+
+function stopCode(ref: string): string {
+	return ref.toLowerCase().replace(/\d+$/, "");
 }
 
 /** Un libellé d'arrêt réduit à ses lettres et ses chiffres, pour être comparé d'une source à l'autre. */
