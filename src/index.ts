@@ -54,17 +54,16 @@ hono.use(
 	}),
 );
 
-/** Ce qu'il y a à émettre à cet instant : le store écarte lui-même les relevés périmés. */
 const nowSeconds = () => Math.floor(Date.now() / 1000);
-const publishedTripUpdates = () => store.publishedTripUpdates(nowSeconds());
-const publishedPositions = () => store.publishedVehiclePositions(nowSeconds());
-const publishedModifications = () => store.publishedTripModifications(nowSeconds());
 
-hono.get("/vehicle-positions", (c) => handleRequest(c, "protobuf", null, publishedPositions()));
-hono.get("/vehicle-positions.json", (c) => handleRequest(c, "json", null, publishedPositions()));
+// Chaque route rend un instantané du store, daté de sa dernière modification : le store écarte
+// lui-même les relevés périmés, et c'est cette date que portent l'en-tête du feed comme le
+// `Last-Modified` de la réponse (cf. `use-realtime-store.ts`).
+hono.get("/vehicle-positions", (c) => handleRequest(c, "protobuf", store.vehiclePositionsSnapshot()));
+hono.get("/vehicle-positions.json", (c) => handleRequest(c, "json", store.vehiclePositionsSnapshot()));
 // Les modifications accompagnent les courses : une course modifiée ne se lit pas sans elles.
-hono.get("/trip-updates", (c) => handleRequest(c, "protobuf", publishedTripUpdates(), null, publishedModifications()));
-hono.get("/trip-updates.json", (c) => handleRequest(c, "json", publishedTripUpdates(), null, publishedModifications()));
+hono.get("/trip-updates", (c) => handleRequest(c, "protobuf", store.tripUpdatesSnapshot()));
+hono.get("/trip-updates.json", (c) => handleRequest(c, "json", store.tripUpdatesSnapshot()));
 /**
  * L'archive GTFS statique du réseau. Le portail la sert en `no-store`, sans ETag ni `Last-Modified` :
  * un consommateur ne peut donc pas savoir qu'une nouvelle version est parue sans la retélécharger
@@ -86,15 +85,7 @@ hono.on(["GET", "HEAD"], "/static-gtfs", (c) => {
 	return c.redirect(STATIC_GTFS_URL, 302);
 });
 
-hono.get("/", (c) =>
-	handleRequest(
-		c,
-		c.req.query("format") === "json" ? "json" : "protobuf",
-		publishedTripUpdates(),
-		publishedPositions(),
-		publishedModifications(),
-	),
-);
+hono.get("/", (c) => handleRequest(c, c.req.query("format") === "json" ? "json" : "protobuf", store.snapshot()));
 
 serve({ fetch: hono.fetch, port: PORT });
 console.log(`➔ Listening on :${PORT}`);
@@ -243,7 +234,7 @@ async function poll() {
 	}
 
 	console.log(
-		`✓ ${store.publishedVehiclePositions(now).size} positions, ${store.publishedTripUpdates(now).size} trip updates (${scheduled} scheduled, ${extra} extra, ${cancelled} cancelled, ${modified} modified, ${predicted} predicted from blocks, ${ambiguous} ambiguous, ${staleRecords} stale records, ${silentTrips} without realtime, ${forgotten} forgotten).`,
+		`✓ ${store.vehiclePositions.published(now).size} positions, ${store.tripUpdates.published(now).size} trip updates (${scheduled} scheduled, ${extra} extra, ${cancelled} cancelled, ${modified} modified, ${predicted} predicted from blocks, ${ambiguous} ambiguous, ${staleRecords} stale records, ${silentTrips} without realtime, ${forgotten} forgotten).`,
 	);
 }
 
